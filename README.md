@@ -1,49 +1,192 @@
 # Automated EC2 Daily Backup & Alert System
 
-This is a small AWS project I'm building to automate daily backups of EC2 instances and get notified when they run.
+This is a small AWS project I built while learning cloud, networking,
+IAM, EC2, storage, and automation.
 
-The idea is pretty simple: a scheduled Lambda function takes an EBS snapshot of a given EC2 volume, and once it's done, it sends a notification so I know the backup actually happened (or if it failed).
+The main idea was simple: **automatically create backups of an EC2
+server and get an email when the backup succeeds or fails.**
 
-I started this to get hands-on practice with IAM roles, Lambda, and event-driven automation on AWS, rather than just reading about them.
+I also tested the recovery process by creating a new EBS volume from a
+snapshot and recovering the test files from it.
 
-## What it does
+## What I used
 
-- Runs on a schedule via EventBridge Scheduler
-- Creates an EBS snapshot of the target EC2 volume
-- Sends an SNS email notification once the backup completes — success or failure
-- Logs every run to CloudWatch so I can go back and check what happened
+-   Amazon EC2
+-   Amazon EBS
+-   EBS Snapshots
+-   AWS Lambda
+-   Python / Boto3
+-   Amazon EventBridge Scheduler
+-   Amazon SNS
+-   AWS IAM
+-   Amazon CloudWatch
 
-## How it's put together
+## How it works
 
-A Lambda function assumes an IAM role (`EC2BackupLambdaRole`) that's scoped to only the permissions it actually needs — creating snapshots, publishing to SNS, and writing logs to CloudWatch. Nothing more.
-
-```
-EventBridge Schedule
+``` text
+EventBridge Scheduler
         |
         v
-      Lambda  --assumes-->  EC2BackupLambdaRole
-                                  |
-                    +-------------+-------------+
-                    |             |             |
-               EBS Snapshot   SNS Publish   CloudWatch Logs
+      Lambda
+        |
+        v
+   EC2 / EBS Volume
+        |
+        v
+   EBS Snapshot
+        |
+        +--------> SNS --------> Email
+        |
+        +--------> CloudWatch Logs
 ```
 
-## Tools used
+The Lambda function finds the EBS volumes attached to my EC2 instance
+and starts snapshot creation.
 
-AWS Lambda, IAM, EBS, SNS, CloudWatch, EventBridge (for the schedule).
+EventBridge Scheduler runs the Lambda automatically.
 
-## Where it stands right now
+SNS sends an email with the backup status, and CloudWatch stores the
+Lambda execution logs.
 
-The core pipeline is working end to end:
+## Recovery test
 
-- IAM role and scoped policy are set up and attached to the function
-- Lambda creates a snapshot of the target volume and sends an SNS email on success
-- Tested the failure path too — pointed it at a bad instance ID on purpose and confirmed it sends a failure notification instead of failing silently
-- CloudWatch logs confirm each run (instance, volume, snapshot ID, timing)
-- EventBridge Scheduler is wired up and triggering the function automatically — running on a longer interval for now while I keep an eye on it, will switch it to a proper daily rate once I'm confident it's stable
+I didn't stop at creating a snapshot. I also tested whether the backup
+could actually be recovered.
 
-Next up: automatic cleanup of old snapshots (retention), and maybe extending this to back up more than one instance.
+I:
 
-## Repo
+1.  Created an EBS snapshot.
+2.  Created a new EBS volume from the snapshot.
+3.  Attached the volume to the EC2 instance.
+4.  Detected the new disk from Linux using `lsblk`.
+5.  Mounted the recovered filesystem.
+6.  Found my original test data.
+7.  Verified `important-data.txt` and `project-info.txt`.
+8.  Unmounted the recovery volume after testing.
 
-https://github.com/AbhayJasrotia/Automated-EC2-Daily-Backup-Alert-System
+This confirmed that the snapshot could be used to recover the test data.
+
+## IAM
+
+The Lambda function uses an IAM execution role instead of storing AWS
+access keys in the code.
+
+The role gives Lambda permissions needed for:
+
+-   Creating and describing EC2/EBS resources
+-   Creating tags on snapshots
+-   Publishing SNS notifications
+-   Writing logs to CloudWatch
+
+I also worked on reducing the permissions to what the project actually
+needs as part of learning IAM and least privilege.
+
+## Failure testing
+
+I tested the failure path as well.
+
+The Lambda function sends a failure notification through SNS when an
+error occurs, and the error is also visible in CloudWatch Logs.
+
+So the project has both:
+
+``` text
+Successful backup -> SNS success email
+Failed backup     -> SNS failure email
+```
+
+## Some Linux commands I used during recovery
+
+``` bash
+lsblk
+lsblk -f
+sudo mkdir /mnt/recovery
+sudo mount -o nouuid /dev/nvme1n1p1 /mnt/recovery
+mount | grep /mnt/recovery
+sudo find /mnt/recovery -name "backup-data" -type d 2>/dev/null
+ls -la /mnt/recovery/home/ec2-user/backup-data
+sudo umount /mnt/recovery
+```
+
+These commands helped me identify the attached disks, mount the
+recovered filesystem, verify the backed-up files, and clean up the
+recovery mount.
+
+## What I learned
+
+This project helped me understand how several AWS services fit together
+instead of learning them separately.
+
+The main things I practiced were:
+
+-   EC2 and EBS
+-   EBS snapshots and recovery
+-   IAM roles and permissions
+-   Lambda automation with Python/Boto3
+-   EventBridge scheduling
+-   SNS notifications
+-   CloudWatch logging
+-   Linux disk and filesystem commands
+-   Backup failure testing
+-   Recovery testing
+-   Basic AWS cost awareness and resource cleanup
+
+## Project structure
+
+``` text
+aws-ec2-automated-backup/
+|
+├── README.md
+├── lambda/
+│   └── backup_lambda.py
+├── docs/
+│   ├── architecture/
+│   │   └── architecture.png
+│   └── screenshots/
+└── notes/
+    ├── day-01.md
+    ├── day-02.md
+    ├── day-03.md
+    ├── day-04.md
+    ├── day-05.md
+    ├── day-06.md
+    ├── day-07.md
+    ├── day-08.md
+    ├── day-09.md
+    └── day-10.md
+```
+
+## Security
+
+I did not put AWS access keys, secret keys, passwords, or my `.pem` file
+in this repository.
+
+For public screenshots, sensitive resource details such as account
+information, email addresses, public IPs, and other identifiers should
+also be hidden where appropriate.
+
+## Final result
+
+The final workflow is:
+
+``` text
+EC2
+ |
+ | EBS
+ v
+Lambda
+ |
+ +--> EBS Snapshot
+ |
+ +--> SNS Email
+ |
+ +--> CloudWatch Logs
+
+EventBridge Scheduler
+ |
+ +--> triggers Lambda daily
+```
+
+The project started as a way to learn AWS by building something
+practical, and the main goal was to understand **how the services
+connect and how a real backup workflow can be automated and tested.**
